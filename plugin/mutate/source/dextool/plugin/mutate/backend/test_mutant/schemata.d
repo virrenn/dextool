@@ -823,3 +823,251 @@ auto spawnTestMutant(TestMutantActor.Impl self, TestRunner runner, TestCaseAnaly
     self.name = "testMutant";
     return impl(self, &run, st, &doConf, st);
 }
+
+private:
+
+import std.format : formattedWrite, format;
+
+import dextool.plugin.mutate.backend.database.type : SchemataFragment;
+import dextool.plugin.mutate.backend.type : Language, SourceLoc, Offset,
+    SourceLocRange, CodeMutant, SchemataChecksum;
+import dextool.plugin.mutate.backend.analyze.utility;
+
+/// Language generic schemata result.
+class SchemataResult {
+    static struct Fragment {
+        Offset offset;
+        const(ubyte)[] text;
+        CodeMutant[] mutants;
+    }
+
+    static struct Schemata {
+        // TODO: change to using appender
+        Fragment[] fragments;
+    }
+
+    private {
+        Schemata[AbsolutePath] schematas;
+    }
+
+    Schemata[AbsolutePath] getSchematas() @safe {
+        return schematas;
+    }
+
+    /// Assuming that all fragments for a file should be merged to one huge.
+    private void putFragment(AbsolutePath file, Fragment sf) {
+        schematas.update(file, () => Schemata([sf]), (ref Schemata a) {
+            a.fragments ~= sf;
+        });
+    }
+
+    override string toString() @safe {
+        import std.range : put;
+        import std.utf : byUTF;
+
+        auto w = appender!string();
+
+        void toBuf(Schemata s) {
+            foreach (f; s.fragments) {
+                formattedWrite(w, "  %s: %s\n", f.offset,
+                        (cast(const(char)[]) f.text).byUTF!(const(char)));
+                formattedWrite(w, "%(    %s\n%)\n", f.mutants);
+            }
+        }
+
+        foreach (k; schematas.byKey.array.sort) {
+            try {
+                formattedWrite(w, "%s:\n", k);
+                toBuf(schematas[k]);
+            } catch (Exception e) {
+            }
+        }
+
+        return w.data;
+    }
+}
+
+/** Build scheman from the fragments.
+ *
+ * TODO: optimize the implementation. A lot of redundant memory allocations
+ * etc.
+ *
+ * Conservative to only allow up to <user defined> mutants per schemata but it
+ * reduces the chance that one failing schemata is "fatal", loosing too many
+ * muntats.
+ */
+struct SchemataBuilder {
+    import std.algorithm : any, all;
+    import my.container.vector;
+    import dextool.plugin.mutate.backend.analyze.schema_ml : SchemaQ;
+
+    alias Fragment = Tuple!(SchemataFragment, "fragment", CodeMutant[], "mutants");
+
+    alias ET = Tuple!(SchemataFragment[], "fragments", CodeMutant[], "mutants",
+            SchemataChecksum, "checksum");
+
+    /// Controls the probability that a mutant is part of the currently generating schema.
+    SchemaQ schemaQ;
+
+    /// use probability for if a mutant is injected or not
+    bool useProbability;
+
+    /// if the probability should also influence if the scheam is smaller.
+    bool useProbablitySmallSize;
+
+    // if fragments that are part of scheman that didn't reach the min
+    // threshold should be discarded.
+    bool discardMinScheman;
+
+    /// The threshold start at this value.
+    double thresholdStartValue = 0.0;
+
+    /// Max mutants per schema.
+    long mutantsPerSchema;
+
+    /// Minimal mutants that a schema must contain for it to be valid.
+    long minMutantsPerSchema = 3;
+
+    /// All mutants that have been used in any generated schema.
+    Set!CodeMutant isUsed;
+
+    Vector!Fragment current;
+    Vector!Fragment rest;
+
+    /// Size in bytes of the cache of fragments.
+    size_t cacheSize;
+
+    /// Save fragments to use them to build schematan.
+    void put(scope FilesysIO fio, SchemataResult.Schemata[AbsolutePath] raw) {
+        foreach (schema; raw.byKeyValue) {
+            const file = fio.toRelativeRoot(schema.key);
+            put(schema.value.fragments, file);
+        }
+    }
+
+    private void incrCache(ref SchemataFragment a) @safe pure nothrow @nogc {
+        cacheSize += a.text.length + (cast(const(ubyte)[]) a.file.toString).length + typeof(a)
+            .sizeof;
+    }
+
+    /** Merge analyze fragments into larger schemata fragments. If a schemata
+     * fragment is large enough it is converted to a schemata. Otherwise kept
+     * for pass2.
+     *
+     * Schematan from this pass only contain one kind and only affect one file.
+     */
+    private void put(SchemataResult.Fragment[] fragments, const Path file) {
+        foreach (a; fragments) {
+            current.put(Fragment(SchemataFragment(file, a.offset, a.text), a.mutants));
+            incrCache(current[$ - 1].fragment);
+        }
+    }
+
+    /** Merge schemata fragments to schemas. A schemata from this pass may may
+     * contain multiple mutation kinds and span over multiple files.
+     */
+    Optional!ET next() {
+        import std.algorithm : max;
+
+        Index!Path index;
+        auto app = appender!(Fragment[])();
+        Set!CodeMutant local;
+        auto threshold = () => max(thresholdStartValue,
+                cast(double) local.length / cast(double) mutantsPerSchema);
+
+        while (!current.empty) {
+            if (local.length >= mutantsPerSchema) {
+                // done now so woop
+                break;
+            }
+
+            auto a = current.front;
+            current.popFront;
+
+            if (a.mutants.empty)
+                continue;
+
+            if (all!(a => a in isUsed)(a.mutants)) {
+                // all mutants in the fragment have already been used in
+                // schemas, discard.
+                continue;
+            }
+
+            if (index.intersect(a.fragment.file, a.fragment.offset)) {
+                rest.put(a);
+                continue;
+            }
+
+            // if any of the mutants in the schema has already been included.
+            if (any!(a => a in local)(a.mutants)) {
+                rest.put(a);
+                continue;
+            }
+
+            // if any of the mutants fail the probability to be included
+            if (useProbability && any!(b => !schemaQ.use(a.fragment.file,
+                    b.mut.kind, threshold()))(a.mutants)) {
+                // TODO: remove this line of code in the future. used for now,
+                // ugly, to see that it behavies as expected.
+                //log.tracef("probability postpone fragment with mutants %s %s",
+                //        a.mutants.length, a.mutants.map!(a => a.mut.kind));
+                rest.put(a);
+                continue;
+            }
+
+            // no use in using a mutant that has zero probability because then, it will always fail.
+            if (any!(b => schemaQ.isZero(a.fragment.file, b.mut.kind))(a.mutants)) {
+                continue;
+            }
+
+            app.put(a);
+            local.add(a.mutants);
+            index.put(a.fragment.file, a.fragment.offset);
+
+            if (useProbablitySmallSize && local.length > minMutantsPerSchema
+                    && any!(b => !schemaQ.use(a.fragment.file, b.mut.kind, threshold()))(a.mutants)) {
+                break;
+            }
+        }
+
+        if (local.length < minMutantsPerSchema) {
+            if (discardMinScheman) {
+                log.tracef("discarding %s fragments with %s mutants",
+                        app.data.length, app.data.map!(a => a.mutants.length).sum);
+            } else {
+                rest.put(app.data);
+            }
+            return none!ET;
+        }
+
+        ET v;
+        v.fragments = app.data.map!(a => a.fragment).array;
+        v.mutants = local.toArray;
+        v.checksum = toSchemataChecksum(v.mutants);
+        isUsed.add(v.mutants);
+        return some(v);
+    }
+
+    bool isDone() @safe pure nothrow const @nogc {
+        return current.empty;
+    }
+
+    void restart() @safe pure nothrow @nogc {
+        current = rest;
+        rest.clear;
+        // allow a fragment to be reused in other schemas, just not this "run".
+        isUsed = typeof(isUsed).init;
+
+        cacheSize = 0;
+        foreach (a; current[])
+            incrCache(a.fragment);
+    }
+
+    /// Shuffle the fragments to try to "evenly" spread out a schema over multiple files.
+    void shuffle() @safe nothrow {
+        import std.random : randomShuffle;
+
+        // TODO: this is...... inefficient but works
+        current = current.array.randomShuffle.array;
+    }
+}
