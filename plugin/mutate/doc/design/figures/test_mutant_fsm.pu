@@ -52,12 +52,13 @@ ChecksumTestCmds --> MeasureTestSuite
 
 MeasureTestSuite --> Error : unreliable
 MeasureTestSuite --> Coverage : useCov && !hasConstraint
-MeasureTestSuite --> LoadSchematas : !useCov
+MeasureTestSuite --> GenerateSchemas : !useCov
 
 Coverage --> PropagateCov : !error
-Coverage --> LoadSchematas : error
-PropagateCov --> LoadSchematas
+Coverage --> GenerateSchemas : error
+PropagateCov --> GenerateSchemas
 
+GenerateSchemas -->LoadSchematas 
 LoadSchematas --> UpdateTimeout
 
 CheckStopCond --> UpdateTimeout
