@@ -842,22 +842,23 @@ class SchemataResult {
         CodeMutant[] mutants;
     }
 
-    static struct Schemata {
+    static struct Fragments {
         // TODO: change to using appender
         Fragment[] fragments;
     }
 
     private {
-        Schemata[AbsolutePath] schematas;
+        Fragments[AbsolutePath] fragments;
     }
 
-    Schemata[AbsolutePath] getSchematas() @safe {
-        return schematas;
+    /// Returns: all fragments containing mutants per file.
+    Fragments[AbsolutePath] getFragments() @safe {
+        return fragments;
     }
 
     /// Assuming that all fragments for a file should be merged to one huge.
     private void putFragment(AbsolutePath file, Fragment sf) {
-        schematas.update(file, () => Schemata([sf]), (ref Schemata a) {
+        fragments.update(file, () => Fragments([sf]), (ref Fragments a) {
             a.fragments ~= sf;
         });
     }
@@ -868,7 +869,7 @@ class SchemataResult {
 
         auto w = appender!string();
 
-        void toBuf(Schemata s) {
+        void toBuf(Fragments s) {
             foreach (f; s.fragments) {
                 formattedWrite(w, "  %s: %s\n", f.offset,
                         (cast(const(char)[]) f.text).byUTF!(const(char)));
@@ -876,10 +877,10 @@ class SchemataResult {
             }
         }
 
-        foreach (k; schematas.byKey.array.sort) {
+        foreach (k; fragments.byKey.array.sort) {
             try {
                 formattedWrite(w, "%s:\n", k);
-                toBuf(schematas[k]);
+                toBuf(fragments[k]);
             } catch (Exception e) {
             }
         }
@@ -939,16 +940,16 @@ struct SchemataBuilder {
     size_t cacheSize;
 
     /// Save fragments to use them to build schematan.
-    void put(scope FilesysIO fio, SchemataResult.Schemata[AbsolutePath] raw) {
-        foreach (schema; raw.byKeyValue) {
-            const file = fio.toRelativeRoot(schema.key);
-            put(schema.value.fragments, file);
-        }
+    void put(scope FilesysIO fio, AbsolutePath file, SchemataResult.Fragments frags) {
+        const auto f = fio.toRelativeRoot(file);
+        put(frags.fragments, f);
     }
 
-    private void incrCache(ref SchemataFragment a) @safe pure nothrow @nogc {
-        cacheSize += a.text.length + (cast(const(ubyte)[]) a.file.toString).length + typeof(a)
-            .sizeof;
+    /// ditto
+    void put(scope FilesysIO fio, SchemataResult.Fragments[AbsolutePath] raw) {
+        foreach (schema; raw.byKeyValue) {
+            this.put(fio, schema.key, schema.value);
+        }
     }
 
     /** Merge analyze fragments into larger schemata fragments. If a schemata
@@ -962,6 +963,11 @@ struct SchemataBuilder {
             current.put(Fragment(SchemataFragment(file, a.offset, a.text), a.mutants));
             incrCache(current[$ - 1].fragment);
         }
+    }
+
+    private void incrCache(ref SchemataFragment a) @safe pure nothrow @nogc {
+        cacheSize += a.text.length + (cast(const(ubyte)[]) a.file.toString).length + typeof(a)
+            .sizeof;
     }
 
     /** Merge schemata fragments to schemas. A schemata from this pass may may
@@ -1098,6 +1104,10 @@ SchemataChecksum toSchemataChecksum(CodeMutant[] mutants) {
 
 /** The total state for building schemas in runtime.
  *
+ * The intention isn't to perfectly travers and handle all mutants in the
+ * worklist if the worklist is manipulated while the schema generation is
+ * running. It is just "good enough" to generate schemas for those mutants when
+ * it was started.
  */
 struct SchemaBuildState {
     import sumtype;
@@ -1110,7 +1120,7 @@ struct SchemaBuildState {
             counter -= v;
         }
 
-        void done() {
+        bool isDone() {
             return counter <= 0;
         }
     }
@@ -1128,9 +1138,9 @@ struct SchemaBuildState {
         stop.counter = v;
     }
 
-    void put(AbsolutePath file, SchemataResult.Fragment f) {
+    void put(scope FilesysIO fio, AbsolutePath file, SchemataResult.Fragments f) {
         stop.decr(f.fragments.length);
-        builder.putFragment(file, f);
+        builder.put(fio, file, f);
     }
 
     void process(ref Database db, Optional!(SchemataBuilder.ET) value) {
@@ -1144,7 +1154,7 @@ struct SchemaBuildState {
                 if (!mutants.empty) {
                     const id = db.schemaApi.putSchemata(a.checksum, a.fragments, mutants);
                     log.infof(!id.isNull, "Saving schema with %s mutants (cache %0.2f Mbyte)",
-                        mutants.length, cast(double) cacheSize / (1024 * 1024));
+                        mutants.length, cast(double) builder.cacheSize / (1024 * 1024));
                 }
             } catch (Exception e) {
                 log.trace(e.msg);

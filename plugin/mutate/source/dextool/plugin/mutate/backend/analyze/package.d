@@ -404,7 +404,7 @@ auto spawnStoreActor(StoreActor.Impl self, FlowControlActor.Address flowCtrl,
             return builder.cacheSize;
         }
 
-        void put(FilesysIO fio, SchemataResult.Schemata[AbsolutePath] a) {
+        void put(FilesysIO fio, SchemataResult.Fragments[AbsolutePath] a) {
             builder.put(fio, a);
         }
 
@@ -759,8 +759,8 @@ auto spawnStoreActor(StoreActor.Impl self, FlowControlActor.Address flowCtrl,
                     }
                 }
 
-                // only save the schematas if mutation points where saved.
-                // This ensure that only schematas for changed/new files
+                // only save schemas if mutation points where saved.
+                // This ensure that only schemas for changed/new files
                 // are saved.
                 ctx.state.get.schemas.put(ctx.fio, result.schematas);
                 ctx.state.get.schemas.setIntermediate;
@@ -1068,7 +1068,7 @@ struct Analyze {
             log.tracef("path dedup count:%s length_acc:%s",
                     ast.get.paths.count, ast.get.paths.lengthAccum);
 
-            result.schematas = schemas.getSchematas;
+            result.schematas = schemas.getFragments;
         }
 
         {
@@ -1187,7 +1187,7 @@ struct Analyze {
         LineMetadata[] metadata;
 
         /// Mutant schematas that has been generated.
-        SchemataResult.Schemata[AbsolutePath] schematas;
+        SchemataResult.Fragments[AbsolutePath] schematas;
 
         /// Coverage intervals that can be instrumented.
         Interval[][LocalFileId] coverage;
