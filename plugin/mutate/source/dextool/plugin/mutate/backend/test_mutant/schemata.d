@@ -826,6 +826,7 @@ auto spawnTestMutant(TestMutantActor.Impl self, TestRunner runner, TestCaseAnaly
 
 private:
 
+import std.algorithm : sum;
 import std.format : formattedWrite, format;
 
 import dextool.plugin.mutate.backend.database.type : SchemataFragment;
@@ -1070,4 +1071,149 @@ struct SchemataBuilder {
         // TODO: this is...... inefficient but works
         current = current.array.randomShuffle.array;
     }
+}
+
+/** A schemata is uniquely identified by the mutants that it contains.
+ *
+ * The order of the mutants are irrelevant because they are always sorted by
+ * their value before the checksum is calculated.
+ *
+ */
+SchemataChecksum toSchemataChecksum(CodeMutant[] mutants) {
+    import dextool.plugin.mutate.backend.utility : BuildChecksum, toChecksum, toBytes;
+    import dextool.utility : dextoolBinaryId;
+
+    BuildChecksum h;
+    // this make sure that schematas for a new version av always added to the
+    // database.
+    h.put(dextoolBinaryId.toBytes);
+    foreach (a; mutants.sort!((a, b) => a.id.value < b.id.value)
+            .map!(a => a.id.value)) {
+        h.put(a.c0.toBytes);
+        h.put(a.c1.toBytes);
+    }
+
+    return SchemataChecksum(toChecksum(h));
+}
+
+/** The total state for building schemas in runtime.
+ *
+ */
+struct SchemaBuildState {
+    import sumtype;
+    import my.optional;
+
+    static struct StopCondition {
+        long counter;
+
+        void decr(long v) {
+            counter -= v;
+        }
+
+        void done() {
+            return counter <= 0;
+        }
+    }
+
+    /// Stop condition for extracting fragments from the database.
+    StopCondition stop;
+
+    SchemataBuilder builder;
+
+    /// User configuration.
+    typeof(ConfigSchema.minMutantsPerSchema) minMutantsPerSchema = 3;
+    typeof(ConfigSchema.mutantsPerSchema) mutantsPerSchema = 1000;
+
+    void setFragments(long v) {
+        stop.counter = v;
+    }
+
+    void put(AbsolutePath file, SchemataResult.Fragment f) {
+        stop.decr(f.fragments.length);
+        builder.putFragment(file, f);
+    }
+
+    void process(ref Database db, Optional!(SchemataBuilder.ET) value) {
+        value.match!((Some!(SchemataBuilder.ET) a) {
+            try {
+                auto mutants = a.mutants
+                    .map!(a => db.mutantApi.getMutationStatusId(a.id))
+                    .filter!(a => !a.isNull)
+                    .map!(a => a.get)
+                    .array;
+                if (!mutants.empty) {
+                    const id = db.schemaApi.putSchemata(a.checksum, a.fragments, mutants);
+                    log.infof(!id.isNull, "Saving schema with %s mutants (cache %0.2f Mbyte)",
+                        mutants.length, cast(double) cacheSize / (1024 * 1024));
+                }
+            } catch (Exception e) {
+                log.trace(e.msg);
+            }
+        }, (None a) {});
+    }
+
+    /// Consume fragments used by scheman containing >min mutants.
+    void setIntermediate() {
+        log.trace("schema generator phase: intermediate");
+        builder.discardMinScheman = false;
+        builder.useProbability = true;
+        builder.useProbablitySmallSize = false;
+        builder.mutantsPerSchema = mutantsPerSchema.get;
+        builder.minMutantsPerSchema = mutantsPerSchema.get;
+        builder.thresholdStartValue = 1.0;
+    }
+
+    void setReducedIntermediate(long sizeDiv, long threshold) {
+        import std.algorithm : max;
+
+        log.tracef("schema generator phase: reduced size:%s threshold:%s", sizeDiv, threshold);
+        builder.discardMinScheman = false;
+        builder.useProbability = true;
+        builder.useProbablitySmallSize = false;
+        builder.mutantsPerSchema = mutantsPerSchema.get;
+        builder.minMutantsPerSchema = max(minMutantsPerSchema.get, mutantsPerSchema.get / sizeDiv);
+        // TODO: interresting effect. this need to be studied. I think this
+        // is the behavior that is "best".
+        builder.thresholdStartValue = 1.0 - (cast(double) threshold / 100.0);
+    }
+
+    void run(ref Database db) {
+        // sort the fragments by file which should allow those with high
+        // probability to result in larger scheman while those with smaller
+        // end up with small scheman. Smaller are thus those that higly
+        // likely fail to compile.
+        // 2021-09-03: sorting the fragments where a bad idea. It lead to
+        // very large schemas in one and the same file which failed
+        // compilation because the computer ran out of memory.
+        // Therefor testing a strategy of shuffling instead.
+        builder.shuffle;
+
+        while (!builder.isDone) {
+            process(db, builder.next);
+        }
+
+        builder.restart;
+    }
+
+    /// Consume all fragments or discard.
+    void finalize(ref Database db) {
+        log.trace("schema generator phase: finalize");
+        builder.discardMinScheman = true;
+        builder.useProbability = false;
+        builder.useProbablitySmallSize = true;
+        builder.mutantsPerSchema = mutantsPerSchema.get;
+        builder.minMutantsPerSchema = minMutantsPerSchema.get;
+        builder.thresholdStartValue = 0;
+
+        // two loops to pass over all mutants and retry new schema
+        // compositions. Any schema that is less than the minimum will be
+        // discarded so the number of mutants will shrink.
+        while (!builder.isDone) {
+            while (!builder.isDone) {
+                process(db, builder.next);
+            }
+            builder.restart;
+        }
+    }
+
 }
