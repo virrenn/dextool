@@ -532,10 +532,12 @@ struct ArgParser {
         void reportG(string[] args) {
             string[] compileDbs;
             string logDir;
-
+            
             data.toolMode = ToolMode.report;
             ReportSection[] sections;
             string metadataPath;
+
+            string coverageFilePath;
 
             // dfmt off
             help_info = getopt(args, std.getopt.config.keepEndOfOptions,
@@ -555,9 +557,11 @@ struct ArgParser {
                    "section-tc_stat-sort", "sort order when reporting test case kill stat " ~ format("[%(%s|%)]", [EnumMembers!ReportKillSortOrder]), &report.tcKillSortOrder,
                    "style", "kind of report to generate " ~ format("[%(%s|%)]", [EnumMembers!ReportKind]), &report.reportKind,
                    "test-metadata", "path to a JSON file containing metadata about tests", &metadataPath,
+                   "coverage-file", "path to coverage test data file", &coverageFilePath,
                    );
             // dfmt on
-
+            import std.stdio;
+            writeln(coverageFilePath);
             if (logDir.empty)
                 logDir = ".";
             report.logDir = logDir.Path.AbsolutePath;

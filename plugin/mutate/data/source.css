@@ -75,6 +75,9 @@ span.xx_label {
 .loc_selected {
     background: #cecece;
 }
+.loc_covered {
+    background: lightblue;
+}
 #filter_wrapper {
     display: block;
 }

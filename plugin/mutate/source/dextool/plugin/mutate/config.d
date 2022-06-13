@@ -61,6 +61,9 @@ struct ConfigReport {
     /// If profiling data should be printed.
     bool profile;
 
+    /// Path to coverage data file
+    string coverageFilePath;
+
     NamedType!(uint, Tag!"HighInterestMutantsNr", uint.init, TagStringable) highInterestMutantsNr = 5;
 
     alias TestMetaData = NamedType!(AbsolutePath, Tag!"TestMetaData",

@@ -663,6 +663,53 @@ void generateFile(ref Database db, ref FileCtx ctx) @trusted {
     Set!MutationId metadataOnlyOnce;
     auto muts = appender!(MData[])();
 
+    // fetching data from coverage data file and saving into coveredLines to be painted futher down in this function
+    import std.container.dlist;
+    import std.regex;
+    import std.range;
+    import std.stdio;
+    auto coveredLines = DList!int();
+    //string filePath = AbsolutePath();
+
+    string filePath = AbsolutePath("~/forked/dextool/plugin/mutate/examples/game_tutorial/build_cov/coverage.info");
+
+    auto coverageInfoFile = File(filePath, "r");
+   
+    // get relevant sections for current file
+    auto formattedTitle = ctx.doc.title.split("__")[1];
+
+    //writeln(formattedTitle);
+    string f = format("%-(%s%)", ["SF:.*", formattedTitle, ".*"]);
+    auto r1 = regex(format(r"%s", f));
+    auto r2 = regex(r"^DA:.*");
+    auto range = coverageInfoFile.byLine();
+    
+    //writeln(ctx.doc.title);
+    bool inFile = false;
+    foreach (coverageFileLine; range) {
+        //writeln(coverageFileLine);
+        if (matchAll(coverageFileLine, r1)) {
+            inFile = true;
+        } 
+        else if (inFile && matchAll(coverageFileLine, r2)) {
+            //add lines to lines to-be colored
+            
+            auto modLine = coverageFileLine.split(":");
+            if (modLine.length > 1) {
+                string splittedLine = to!string(modLine[1]);
+                string[] coverageLineInfo = splittedLine.split(",");
+                if(coverageLineInfo.length > 1 && to!int(coverageLineInfo[1]) > 0) {
+                    coveredLines.insertBack(to!int(coverageLineInfo[0]));
+                }
+            }    //getElementById("loc-" + id)
+            
+        }
+        else if (inFile && coverageFileLine == "end_of_record") {
+            inFile = false;
+        }
+    }
+
+
     // this is the last location. It is used to calculate the num of
     // newlines, detect when a line changes etc.
     auto lastLoc = SourceLoc(1, 1);
@@ -678,6 +725,13 @@ void generateFile(ref Database db, ref FileCtx ctx) @trusted {
             line.setAttribute("id", format("%s-%s", "loc", lastLoc.line + i + 1))
                 .addClass("loc").addChild("span", format("%s:",
                         lastLoc.line + i + 1)).addClass("line_nr");
+            
+            // color lines from covered list
+            if (!coveredLines.empty() && coveredLines.front() == lastLoc.line + i + 1) {
+                coveredLines.removeFront();
+                line.addClass("loc_covered");
+            }
+
 
             // force a newline in the generated html to improve readability
             lines.appendText("\n");
@@ -692,8 +746,10 @@ void generateFile(ref Database db, ref FileCtx ctx) @trusted {
             addClass(s.tok.toName);
             if (auto v = meta.status.toVisible)
                 addClass(v);
-            if (s.muts.length != 0)
+            if (s.muts.length != 0) {
                 addClass(format("%(mutid%s %)", s.muts.map!(a => a.id)));
+                line.removeClass("loc_covered"); // Covered lines does not overlap with mutants
+            }
             if (meta.onClick.length != 0)
                 setAttribute("onclick", meta.onClick);
         }
