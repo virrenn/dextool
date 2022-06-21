@@ -1099,7 +1099,7 @@ nothrow:
 
     void opCall(SaveMutationScore data) {
         import dextool.plugin.mutate.backend.database.type : MutationScore;
-        import dextool.plugin.mutate.backend.report.analyzers : reportScore;
+        import dextool.plugin.mutate.backend.report.analyzers : reportScore, reportScores;
 
         if (spinSql!(() => db.mutantApi.unknownSrcMutants(kinds)).count != 0)
             return;
@@ -1113,16 +1113,29 @@ nothrow:
         if (spinSql!(() => db.timeoutApi.countMutantTimeoutWorklist) != 0)
             return;
 
-        const score = reportScore(*db, kinds).score;
+        auto files = spinSql!(() => db.getFilesStrings());
 
+        const fileScores = reportScores(*db, kinds, files);
+        const score = reportScore(*db, kinds);
+        const time = Clock.currTime;
         // 10000 mutation scores is only ~80kbyte. Should be enough entries
         // without taking up unreasonable amount of space.
+
         spinSql!(() @trusted {
             auto t = db.transaction;
-            db.putMutationScore(MutationScore(Clock.currTime, typeof(MutationScore.score)(score)));
+            db.putMutationScore(MutationScore(time, typeof(MutationScore.score)(score.score)));
             db.trimMutationScore(10000);
             t.commit;
         });
+
+        foreach(fileScore; fileScores){
+            spinSql!(() @trusted {
+                auto t = db.transaction;
+                db.putMutationFileScore(MutationScore(time, typeof(MutationScore.score)(fileScore.score), fileScore.filePath));
+                db.trimMutationScore(10000);
+                t.commit;
+            });
+        }
     }
 
     void opCall(UpdateTestCaseTag data) {

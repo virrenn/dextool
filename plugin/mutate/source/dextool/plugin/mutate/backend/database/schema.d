@@ -101,6 +101,7 @@ immutable mutantTimeoutWorklistTable = "mutant_timeout_worklist";
 immutable mutantWorklistTable = "mutant_worklist";
 immutable mutationPointTable = "mutation_point";
 immutable mutationScoreHistoryTable = "mutation_score_history";
+immutable mutationFileScoreHistoryTable = "mutation_file_score_history";
 immutable mutationStatusTable = "mutation_status";
 immutable mutationTable = "mutation";
 immutable nomutDataTable = "nomut_data";
@@ -654,6 +655,20 @@ struct MutationScoreHistoryTable {
     double score;
 }
 
+@TableName(mutationFileScoreHistoryTable)
+struct MutationFileScoreHistoryTable {
+    long id;
+
+    /// when the measurement was taken.
+    @ColumnName("time")
+    SysTime timeStamp;
+
+    double score;
+
+    @ColumnName("filePath")
+    string filePath;
+}
+
 /** All functions that has been discovered in the source code.
  * The `offset_begin` is where instrumentation points can be injected.
  */
@@ -676,7 +691,7 @@ struct CoverageCodeRegionTable {
  * mean that something went wrong when gathering the data.
  */
 @TableName(srcCovInfoTable)
-@TableForeignKey("id", KeyRef("src_cov_info(id)"), KeyParam("ON DELETE CASCADE"))
+@TableForeignKey("id", KeyRef("src_cov_instr(id)"), KeyParam("ON DELETE CASCADE"))
 struct CoverageInfoTable {
     long id;
 
@@ -892,6 +907,7 @@ void upgradeV0(ref Miniorm db) {
             SchemataMutantTable,
             SchemataUsedTable, SchemaMutantKindQTable, SchemaSizeQTable,
             MutantWorklistTbl, RuntimeHistoryTable, MutationScoreHistoryTable,
+            MutationFileScoreHistoryTable,
             TestFilesTable, CoverageCodeRegionTable,
             CoverageInfoTable, CoverageTimeTtampTable, DependencyFileTable,
             DependencyRootTable,
@@ -1661,6 +1677,15 @@ void upgradeV30(ref Miniorm db) {
 
 /// 2020-12-29
 void upgradeV31(ref Miniorm db) {
+    @TableName(srcCovInfoTable)
+    @TableForeignKey("id", KeyRef("src_cov_info(id)"), KeyParam("ON DELETE CASCADE"))
+    struct CoverageInfoTable {
+        long id;
+
+        /// True if the region has been visited.
+        bool status;
+    }
+
     db.run(buildSchema!(CoverageCodeRegionTable, CoverageInfoTable, CoverageTimeTtampTable));
 }
 
@@ -1867,6 +1892,12 @@ void upgradeV49(ref Miniorm db) {
 void upgradeV50(ref Miniorm db) {
     db.run("DROP TABLE " ~ testCmdOriginalTable);
     db.run(buildSchema!(TestCmdRelMutantTable, TestCmdTable, TestCmdOriginalTable));
+}
+
+// 2022-06-14
+void upgradeV51(ref Miniorm db) {
+    db.run("DROP TABLE " ~ srcCovInfoTable);
+    db.run(buildSchema!CoverageInfoTable);
 }
 
 void replaceTbl(ref Miniorm db, string src, string dst) {
