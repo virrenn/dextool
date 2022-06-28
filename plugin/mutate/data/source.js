@@ -296,7 +296,6 @@ function set_mutation_options(loc_id) {
 function traverse_mutants(direction) {
     current_mutant_selector = document.getElementById('current_mutant');
     selected = current_mutant_selector.selectedIndex;
-    console.log(selected);
     if (direction>0) {
         if (selected+1 < current_mutant_selector.options.length)
             current_mutant_selector.selectedIndex += 1;
@@ -315,7 +314,6 @@ function traverse_mutants(direction) {
         }
     }
     var mutid = current_mutant_selector.value;
-    console.log("mutid: " + mutid);
 
     set_active_mutant(mutid);
     highlight_mutant(mutid);
