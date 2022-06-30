@@ -78,8 +78,7 @@ Table tmplSortableTable(Element n, string[] header, void delegate(Element e, str
         auto th = tr.addChild("th", h.value);
         if (tdCallback)
             tdCallback(th, h.value);
-        DashboardCss.sortableTableCol(th).setAttribute("id",
-                format!"col-%s"(h.index)).appendText(" ").addChild("i").addClass("right");
+        DashboardCss.sortableTableCol(th).setAttribute("class", "table-col-sortable");
     }
 
     base.tbl.addChild("thead").appendChild(tr);

@@ -21,31 +21,52 @@ body {font-family: monospace; font-size: 14px; overflow-x: hidden;}
 .tbl_header {
     cursor: pointer;
 }
+
+.table-col-sortable {
+  background-color: #ddd;
+  padding: 10px;
+  border: 1px solid #fff;
+  background-image: url(img/arrow.png);
+  background-repeat: no-repeat;
+  background-position: center right;
+}
+
+.table-col-sortable:hover {
+  background-color: #ccc;  
+}
+
 i {
-    border: solid black;
-    border-width: 0 3px 3px 0;
-    display: inline-block;
-    padding: 3px;
+  border: solid black;
+  border-width: 0 3px 3px 0;
+  display: inline-block;
+  padding: 3px;
 }
 
 .right {
-    transform: rotate(-45deg);
-    -webkit-transform: rotate(-45deg);
+  transform: rotate(-45deg);
+  -webkit-transform: rotate(-45deg);
+  background-image: url(img/arrow.png);
+  background-repeat: no-repeat;
+  background-position: center right;
 }
 
 .left {
-    transform: rotate(135deg);
-    -webkit-transform: rotate(135deg);
+  transform: rotate(135deg);
+  -webkit-transform: rotate(135deg);
 }
 
 .up {
-    transform: rotate(-135deg);
-    -webkit-transform: rotate(-135deg);
+  transform: rotate(-135deg);
+  -webkit-transform: rotate(-135deg);
 }
 
 .down {
-    transform: rotate(45deg);
-    -webkit-transform: rotate(45deg);
+  transform: rotate(45deg);
+  -webkit-transform: rotate(45deg);
+}
+
+.arrow-div {
+  position: relative;
 }
 
 /* --- tab style --- */
