@@ -279,15 +279,20 @@ struct Database {
     }
 
     /// Returns: the stored scores in ascending order by their `time`.
-    FileScore[] getMutationFileScoreHistory() @trusted {
-        auto app = appender!(FileScore[])();
-        auto stmt = db.prepare(format!"SELECT AVG(score), file_path FROM (SELECT * FROM %s WHERE time_stamp > date('now', '-7 day')) GROUP BY file_path"(
-                mutationFileScoreHistoryTable));
-        foreach (a; stmt.get.execute) {
-            app.put(FileScore(SysTime(0),
-                    typeof(FileScore.score)(a.peek!double(0)), Path(a.peek!string(1))));
+    FileScore[][string] getMutationFileScoreHistory() @trusted {
+        import std.algorithm : sort;
+
+        FileScore[][string] scoreDict;
+        foreach (r; db.run(select!MutationFileScoreHistoryTable)) {
+            scoreDict[r.filePath] ~= FileScore(r.timeStamp,
+                    typeof(FileScore.score)(r.score), Path(r.filePath));
         }
-        return app.data;
+
+        foreach (key; scoreDict.byKey()) {
+            scoreDict[key] = scoreDict[key].sort!((a, b) => a.timeStamp > b.timeStamp).array;
+        }
+
+        return scoreDict;
     }
 
     /// Add a mutation score to the history table.
