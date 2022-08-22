@@ -1208,34 +1208,23 @@ struct ScoreTrendByCodeChange {
  *
  */
 ScoreTrendByCodeChange reportTrendByCodeChange(ref Database db, const Mutation.Kind[] kinds) @trusted nothrow {
+    import dextool.plugin.mutate.backend.database.type : XFileScore = FileScore, XMutationScore = MutationScore;
+
     auto app = appender!(ScoreTrendByCodeChange.Point[])();
-    EstimateScore estimate;
 
-    try {
-        SysTime lastAdded;
-        SysTime last;
-        bool first = true;
-        void fn(const Mutation.Status s, const SysTime added) {
-            estimate.update(s);
-            debug logger.trace(estimate.estimate.kf).collectException;
+    XFileScore[][string] fileScores;
+    XMutationScore[] mutationScores;
 
-            if (first)
-                lastAdded = added;
-
-            if (added != lastAdded) {
-                app.put(ScoreTrendByCodeChange.Point(added, estimate.value, estimate.error));
-                lastAdded = added;
-            }
-
-            last = added;
-            first = false;
+    spinSql!(() {
+        fileScores = db.getMutationFileScoreHistory;
+        mutationScores = db.getMutationScoreHistory;
         }
+    );
 
-        db.iterateMutantStatus(kinds, &fn);
-        app.put(ScoreTrendByCodeChange.Point(last, estimate.value, estimate.error));
-    } catch (Exception e) {
-        logger.warning(e.msg).collectException;
-    }
+    logger.warning(fileScores).collectException;
+    logger.warning(mutationScores).collectException;
+
+
     return ScoreTrendByCodeChange(app.data);
 }
 
