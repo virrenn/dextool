@@ -1202,15 +1202,30 @@ struct ScoreTrendByCodeChange {
     }
 }
 
+struct ScoreTrend {
+    static struct Point {
+        SysTime timeStamp;
+        double value;
+    }
+
+    Point[] sample;
+
+    double value() @safe pure nothrow const @nogc {
+        if (sample.empty)
+            return typeof(return).init;
+        return sample[$ - 1].value;
+    }
+}
+
 /** Estimate the mutation score by running a kalman filter over the mutants in
  * the order they have been tested. It gives a rough estimate of where the test
  * suites quality is going over time.
  *
  */
-ScoreTrendByCodeChange reportTrendByCodeChange(ref Database db, const Mutation.Kind[] kinds) @trusted nothrow {
+ScoreTrend reportTrendByCodeChange(ref Database db, const Mutation.Kind[] kinds) @trusted nothrow {
     import dextool.plugin.mutate.backend.database.type : XFileScore = FileScore, XMutationScore = MutationScore;
 
-    auto app = appender!(ScoreTrendByCodeChange.Point[])();
+    auto app = appender!(ScoreTrend.Point[])();
 
     XFileScore[][string] fileScores;
     XMutationScore[] mutationScores;
@@ -1221,11 +1236,12 @@ ScoreTrendByCodeChange reportTrendByCodeChange(ref Database db, const Mutation.K
         }
     );
 
-    logger.warning(fileScores).collectException;
-    logger.warning(mutationScores).collectException;
+    foreach(score; mutationScores){
+        app.put(ScoreTrend.Point(score.timeStamp, score.score.get));
+    }
 
 
-    return ScoreTrendByCodeChange(app.data);
+    return ScoreTrend(app.data);
 }
 
 /** History of how the mutation score have evolved over time.

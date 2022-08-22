@@ -64,7 +64,7 @@ void makeTrend(ref Database db, string tag, Element root, const(Mutation.Kind)[]
     if (codeChange.sample.length > 2) {
         ts = TimeScalePointGraph("ScoreByCodeChange");
         foreach (v; codeChange.sample) {
-            ts.put("Score", TimeScalePointGraph.Point(v.timeStamp, v.value.get));
+            ts.put("Score", TimeScalePointGraph.Point(v.timeStamp, v.value));
         }
         ts.setColor("Score", "purple");
         ts.html(base, TimeScalePointGraph.Width(80));
