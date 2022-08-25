@@ -680,6 +680,7 @@ struct CoverageCodeRegionTable {
 
     @ColumnName("file_id")
     long fileId;
+    bool status;
 
     /// the region in the files, in bytes.
     uint begin;
@@ -1893,6 +1894,18 @@ void upgradeV51(ref Miniorm db) {
 // 2022-06-21
 void upgradeV52(ref Miniorm db) {
     db.run(buildSchema!MutationFileScoreHistoryTable);
+}
+
+
+void upgradeV53(ref Miniorm db) {
+    static immutable newTbl = "new_" ~ srcCovTable;
+    db.run(buildSchema!CoverageCodeRegionTable("new_"));
+
+    db.run("INSERT INTO " ~ newTbl ~ " (id,fileId,begin,end,status) SELECT instr.id, instr.file_id, instr.begin, instr.end, info.status FROM " ~ srcCovTable ~ " AS instr, " ~ srcCovInfoTable ~ " AS info WHERE instr.id = info.id");
+
+    replaceTbl(db, newTbl, srcCovTable);
+
+    db.run("DROP TABLE " ~ srcCovInfoTable);
 }
 
 void replaceTbl(ref Miniorm db, string src, string dst) {
